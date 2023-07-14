@@ -23,7 +23,9 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x ./example/Android/LLMAssistant/gradlew
     - name: Build with Gradle
-      run: ./example/Android/LLMAssistant/gradlew build
+      run: |
+        cd ./example/Android/LLMAssistant/
+        ./gradlew build
       
     - uses: actions/upload-artifact@v3
       with:

@@ -37,7 +37,7 @@ jobs:
         #emcmake cmake -B build 
         mkdir build
         cd build
-        emcmake cmake .. -DUSE_CUDA=ON -DCMAKE_CXX_COMPILER=${{env.EMSDK}}/upstream/bin/em++ -DCMAKE_C_COMPILER=${{env.EMSDK}}/upstream/bin/emcc
+        emcmake cmake .. -DUSE_CUDA=OFF -DCMAKE_CXX_COMPILER=${{env.EMSDK}}/upstream/bin/em++ -DCMAKE_C_COMPILER=${{env.EMSDK}}/upstream/bin/emcc
         emmake make -j
     - uses: actions/upload-artifact@v3
       with:

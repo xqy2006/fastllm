@@ -32,8 +32,7 @@ jobs:
         mkdir build
         cd build
         cmake .. -DUSE_CUDA=OFF
-        cd ..
-        cmake --build build -j
+        cmake --build -j
     - uses: actions/upload-artifact@v3
       with:
           name: build-${{ runner.os }}

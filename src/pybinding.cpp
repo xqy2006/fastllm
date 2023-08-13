@@ -6,6 +6,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/chrono.h>
 #include <pybind11/functional.h>
+#include <unordered_map>
 
 namespace py = pybind11;
 using namespace pybind11::literals;  
@@ -29,6 +30,7 @@ PYBIND11_MODULE(pyfastllm, m) {
 	  .def_readwrite("top_k", &fastllm::GenerationConfig::top_k) 
 	  .def_readwrite("top_p", &fastllm::GenerationConfig::top_p) 
 	  .def_readwrite("temperature", &fastllm::GenerationConfig::temperature)
+	  .def_readwrite("enable_hash_id", &fastllm::GenerationConfig::enable_hash_id)
 	  .def("is_simple_greedy", &fastllm::GenerationConfig::IsSimpleGreedy); 
 
   // high level
@@ -38,8 +40,11 @@ PYBIND11_MODULE(pyfastllm, m) {
     .def("get_low_memory", &fastllm::GetLowMemMode)
     .def("set_kv_cache", &fastllm::SetKVCacheInCPU)
     .def("get_kv_cache", &fastllm::GetKVCacheInCPU)
+    .def("set_device_map", &fastllm::SetDeviceMap)
     .def("create_llm", &fastllm::CreateLLMModelFromFile);
-  
+  m.def("std_hash", [](std::string input) -> size_t {
+		return std::hash<std::string>{}(input);
+  }); 
   // low level
   m.def("get_llm_type", &fastllm::GetModelTypeFromFile);
 
@@ -173,7 +178,8 @@ PYBIND11_MODULE(pyfastllm, m) {
     })
     .def("launch_response", &fastllm::ChatGLMModel::LaunchResponseTokens)
     .def("fetch_response", &fastllm::ChatGLMModel::FetchResponseTokens)
-    .def("save_lowbit_model", &fastllm::ChatGLMModel::SaveLowBitModel);
+    .def("save_lowbit_model", &fastllm::ChatGLMModel::SaveLowBitModel)
+    .def("make_input", &fastllm::ChatGLMModel::MakeInput);
 
   py::class_<fastllm::MOSSModel, fastllm::basellm>(m, "MOSSModel")
     .def(py::init<>())
@@ -203,7 +209,8 @@ PYBIND11_MODULE(pyfastllm, m) {
     })
     .def("launch_response", &fastllm::MOSSModel::LaunchResponseTokens)
     .def("fetch_response", &fastllm::MOSSModel::FetchResponseTokens)
-    .def("save_lowbit_model", &fastllm::MOSSModel::SaveLowBitModel);
+    .def("save_lowbit_model", &fastllm::MOSSModel::SaveLowBitModel)
+    .def("make_input", &fastllm::MOSSModel::MakeInput);
 
   py::class_<fastllm::LlamaModel, fastllm::basellm>(m, "LlamaModel")
     .def(py::init<>())
@@ -234,7 +241,8 @@ PYBIND11_MODULE(pyfastllm, m) {
     })
     .def("launch_response", &fastllm::LlamaModel::LaunchResponseTokens)
     .def("fetch_response", &fastllm::LlamaModel::FetchResponseTokens)
-    .def("save_lowbit_model", &fastllm::LlamaModel::SaveLowBitModel);
+    .def("save_lowbit_model", &fastllm::LlamaModel::SaveLowBitModel)
+    .def("make_input", &fastllm::LlamaModel::MakeInput);
 #ifdef VERSION_INFO
     m.attr("__version__") = VERSION_INFO;
 #else

@@ -10,7 +10,8 @@ fastllm_data_type_dict = {
 }
 fastllm_weight_type_dict = {
     "linear": 1,
-    "embedding": 2
+    "embedding": 2,
+    "QuantizedLinear": 111
 }
 
 def create(model,
@@ -38,13 +39,17 @@ def create(model,
         # Baichuan 2代
         modelInfo["use_alibi"] = "1";
         modelInfo["pre_prompt"] = "";
-        modelInfo["user_role"] = tokenizer.decode([model.generation_config.user_token_id]);
-        modelInfo["bot_role"] = tokenizer.decode([model.generation_config.assistant_token_id]);
+        modelInfo["user_role"] = ("<FLM_FIX_TOKEN_" + str(model.generation_config.user_token_id) + "> ") if hasattr(model.generation_config, "user_token_id") else "";
+        modelInfo["bot_role"] = ("<FLM_FIX_TOKEN_" + str(model.generation_config.assistant_token_id) + ">") if hasattr(model.generation_config, "assistant_token_id") else "";
         modelInfo["history_sep"] = "";
 
     weight_type_dict = {};
     module_dict = {};
+    weight_bits = {};
     for key, m in model.named_modules():
+        if (str(type(m)).find("QuantizedLinear") != -1):
+            weight_type_dict[key + ".weight"] = "QuantizedLinear";
+            weight_bits[key + ".weight"] = m.weight_bit_width;
         if (isinstance(m, torch.nn.Linear)):
             weight_type_dict[key + ".weight"] = "linear";
             module_dict[key + ".weight"] = m;
@@ -60,14 +65,21 @@ def create(model,
 
     # 1. vocab
     if (tokenizer):
+        if (hasattr(tokenizer, "tokenizer")):
+            tokenizer = tokenizer.tokenizer;
         if (hasattr(tokenizer, "sp_model")):
             piece_size = tokenizer.sp_model.piece_size();
             for i in range(piece_size):
-                llm.fastllm_lib.add_tokenizer_word_llm_model(model, tokenizer.sp_model.id_to_piece(i).encode(), i);
+                llm.fastllm_lib.add_tokenizer_word_llm_model(model, tokenizer.sp_model.id_to_piece(i).encode(),
+                                                             i, ctypes.c_float(tokenizer.sp_model.get_score(i)));
         else:
             vocab = tokenizer.get_vocab();
             for v in vocab.keys():
-                llm.fastllm_lib.add_tokenizer_word_llm_model(model, v.encode(), vocab[v]);
+                if (modelInfo["model_type"] == "moss"):
+                    vv = [(ord(c) if c not in tokenizer.byte_decoder else tokenizer.byte_decoder[c]) for c in v];
+                    llm.fastllm_lib.add_tokenizer_word_llm_model(model, vv, vocab[v], ctypes.c_float(1.0));
+                else:
+                    llm.fastllm_lib.add_tokenizer_word_llm_model(model, v.encode(), vocab[v], ctypes.c_float(1.0));
     tot = 0;
     for key in dict:
         ori_data_type = 0;
@@ -86,7 +98,15 @@ def create(model,
             # TODO bfloat
             to_data_type = 0;
 
-        llm.fastllm_lib.add_weight_llm_model(model, key.encode(),
+        if (cur_weight_type == 111):
+            llm.fastllm_lib.add_qlinear_weight_llm_model(model, key.encode(),
+                                                 len(dict[key].shape),
+                                                 (ctypes.c_int * len(dict[key].shape))(*list(dict[key].shape)),
+                                                 weight_bits[key],
+                                                 dict[key + "_scale"].numpy().astype(np.float32).ctypes.data_as(ctypes.c_void_p),
+                                                 dict[key].numpy().ctypes.data_as(ctypes.c_void_p));
+        else:
+            llm.fastllm_lib.add_weight_llm_model(model, key.encode(),
                                              len(dict[key].shape),
                                              (ctypes.c_int * len(dict[key].shape))(*list(dict[key].shape)),
                                              to_data_type, cur_weight_type, ori_data_type,

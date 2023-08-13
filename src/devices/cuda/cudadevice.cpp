@@ -33,6 +33,14 @@ namespace fastllm {
         this->ops["RotatePosition2D"] = (BaseOperator*)(new CudaRotatePosition2DOp());
         this->ops["NearlyRotatePosition2D"] = (BaseOperator*)(new CudaNearlyRotatePosition2DOp());
         this->ops["LlamaRotatePosition2D"] = (BaseOperator*)(new CudaLlamaRotatePosition2DOp());
+
+        this->ops["SplitBatch"] = (BaseOperator*)(new CudaSplitBatchOp());
+        this->ops["CatBatch"] = (BaseOperator*)(new CudaCatBatchOp());
+        this->ops["MulBatch"] = (BaseOperator*)(new CudaMulBatchOp());
+        this->ops["MatMulBatch"] = (BaseOperator*)(new CudaMatMulBatchOp());
+        this->ops["MatMulTransBBatch"] = (BaseOperator*)(new CudaMatMulTransBBatchOp());
+        this->ops["SoftMaxBatch"] = (BaseOperator*)(new CudaSoftmaxBatchOp());
+        this->ops["CatDirectBatch"] = (BaseOperator*)(new CudaCatDirectBatchOp());
     }
 
     bool CudaDevice::Malloc(void **ret, size_t size) {
@@ -114,10 +122,6 @@ namespace fastllm {
 
     bool CudaLinearOp::CanRun(const std::string &opType, const fastllm::DataDict &datas,
                               const fastllm::FloatDict &floatParams, const fastllm::IntDict &intParams) {
-        Data &weight = *(datas.find("weight")->second);
-        if (weight.dataType == DataType::FLOAT32) {
-            return false;
-        }
         return true;
     }
 
@@ -133,7 +137,9 @@ namespace fastllm {
         int m = input.dims.back();
         int k = output.dims.back();
 
-        if (weight.dataType == DataType::FLOAT16) {
+        if (weight.dataType == DataType::FLOAT32) {
+            FastllmCudaMatMulFloat32(input, weight, bias, output, n, m, k);
+        } else if (weight.dataType == DataType::FLOAT16) {
             FastllmCudaMatMulFloat16(input, weight, bias, output, n, m, k);
         } else if (weight.dataType == DataType::INT8) {
             FastllmCudaMatMulFloatInt8(input, weight, bias, output, n, m, k);

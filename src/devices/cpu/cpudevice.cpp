@@ -20,6 +20,8 @@
 namespace fastllm {
     CpuDevice::CpuDevice() {
         this->deviceType = "cpu";
+        this->ops["ToFloat16"] = (BaseOperator*)(new CpuToFloat16());
+        this->ops["ToFloat32"] = (BaseOperator*)(new CpuToFloat32());
         this->ops["Embedding"] = (BaseOperator*)(new CpuEmbedding());
         this->ops["LayerNorm"] = (BaseOperator*)(new CpuLayerNormOp());
         this->ops["RMSNorm"] = (BaseOperator*)(new CpuRMSNormOp());
@@ -45,6 +47,7 @@ namespace fastllm {
         this->ops["NearlyRotatePosition2D"] = (BaseOperator*)(new CpuNearlyRotatePosition2DOp());
         this->ops["LlamaRotatePosition2D"] = (BaseOperator*)(new CpuLlamaRotatePosition2DOp());
         this->ops["RepeatPenalty"] = (BaseOperator*)(new CpuRepeatPenaltyOp());
+        this->ops["ApplyLognAttn"] = (BaseOperator*)(new CpuApplyLognAttnOp());
 
         this->ops["SplitBatch"] = (BaseOperator*)(new CpuSplitBatchOp());
         this->ops["CatBatch"] = (BaseOperator*)(new CpuCatBatchOp());
@@ -148,6 +151,48 @@ namespace fastllm {
         return ans + I32sum(acc);
     };
 #endif
+
+    void CpuToFloat16::Run(const std::string &opType, const fastllm::DataDict &datas,
+                           const fastllm::FloatDict &floatParams, const fastllm::IntDict &intParams) {
+        Data &data = *(datas.find("input")->second);
+        if (data.dataType == DataType::FLOAT16) {
+            return;
+        }
+        if (data.dataType == DataType::FLOAT32) {
+            float *old = (float*)data.cpuData;
+            data.dataType = DataType::FLOAT16;
+            data.cpuData = new uint8_t[data.GetBytes()];
+            uint16_t *cur = (uint16_t*)data.cpuData;
+            int len = data.Count(0);
+            for (int i = 0; i < len; i++) {
+                cur[i] = float_to_half(old[i]);
+            }
+            delete[] old;
+        } else {
+            ErrorInFastLLM("ToFloat16: unsupport dataType.\n");
+        }
+    }
+
+    void CpuToFloat32::Run(const std::string &opType, const fastllm::DataDict &datas,
+                           const fastllm::FloatDict &floatParams, const fastllm::IntDict &intParams) {
+        Data &data = *(datas.find("input")->second);
+        if (data.dataType == DataType::FLOAT32) {
+            return;
+        }
+        if (data.dataType == DataType::FLOAT16) {
+            uint16_t *old = (uint16_t*)data.cpuData;
+            data.dataType = DataType::FLOAT32;
+            data.cpuData = new uint8_t[data.GetBytes()];
+            float *cur = (float*)data.cpuData;
+            int len = data.Count(0);
+            for (int i = 0; i < len; i++) {
+                cur[i] = half_to_float(old[i]);
+            }
+            delete[] old;
+        } else {
+            ErrorInFastLLM("ToFloat32: unsupport dataType.\n");
+        }
+    }
 
     void CpuEmbedding::Reshape(const std::string &opType, const fastllm::DataDict &datas,
                                const fastllm::FloatDict &floatParams, const fastllm::IntDict &intParams) {
@@ -2077,6 +2122,20 @@ namespace fastllm {
                     memcpy(tmpData + (j * n + i) * k, curData + (i * m + j) * k, k * sizeof(float));
                 }
             }
+        } else if (axis == std::vector<int> {0, 2, 1, 3}) {
+            int b = input.dims[0];
+            int n = input.dims[1];
+            int m = input.dims[2];
+            int k = input.dims[3];
+            for (int o = 0; o < b; o++) {
+                for (int i = 0; i < n; i++) {
+                    for (int j = 0; j < m; j++) {
+                        memcpy(tmpData + (j * n + i) * k, curData + (i * m + j) * k, k * sizeof(float));
+                    }
+                }
+                tmpData += output.Count(1);
+                curData += input.Count(1);
+            }
         } else {
             std::vector<int> oldSteps;
             std::vector<int> newSteps;
@@ -2244,6 +2303,31 @@ namespace fastllm {
         int len = input.Count(0);
         for (int i = 0; i < len; i++) {
             inputData[i] = inputData[i] < 0 ? inputData[i] * penaltyData[i] : inputData[i] / penaltyData[i];
+        }
+    }
+
+    void CpuApplyLognAttnOp::Run(const std::string &opType, const fastllm::DataDict &datas,
+                                 const fastllm::FloatDict &floatParams, const fastllm::IntDict &intParams) {
+        Data &input = *(datas.find("input")->second);
+        Data &lognAttn = *(datas.find("lognAttn")->second);
+        Data &positionIds = *(datas.find("positionIds")->second);
+
+        float *inputData = (float *) input.cpuData;
+        float *lognData = (float *) lognAttn.cpuData;
+
+        int batch = input.dims[0];
+        int seqLen = input.dims[1];
+        int spatial = input.Count(2);
+        int curPos = (int) ((float *) positionIds.cpuData) [0];
+        for (int b = 0; b < batch; b++) {
+            float *curInput = inputData + b * seqLen * spatial;
+            for (int i = 0; i < seqLen; i++) {
+                float logn = lognData[i + curPos];
+                for (int s = 0; s < spatial; s++) {
+                    curInput[s] *= logn;
+                }
+                curInput += spatial;
+            }
         }
     }
 }
